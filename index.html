@@ -5,28 +5,38 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Wikipedia, Live</title>
-    <style>
-        html,
-        body {
-            margin: 0;
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-            background: #f2eee4;
-        }
-
-        #map-canvas {
-            display: block;
-            width: 100vw;
-            height: 100vh;
-        }
-    </style>
+    <meta name="description"
+        content="A minimalist real-time world map and live feed of human edits to geographic Wikipedia articles, styled like Mini Metro on muted color e-ink paper." />
+    <meta property="og:title" content="Wikipedia, Live" />
+    <meta property="og:description"
+        content="A minimalist real-time world map and live feed of human edits to geographic Wikipedia articles, styled like Mini Metro on muted color e-ink paper." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" type="image/svg+xml"
+        href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23F2EEE4'/%3E%3Ccircle cx='16' cy='16' r='7.5' fill='%23FBF9F2' stroke='%23343632' stroke-width='3'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="./style.css" />
 </head>
 
 <body>
-    <main class="map-pane">
-        <canvas id="map-canvas"></canvas>
-    </main>
+    <div id="app">
+        <div class="info-widget" id="info-widget">
+            <button type="button" class="info-btn" id="info-btn" aria-label="About this map"
+                aria-expanded="false">i</button>
+            <div class="info-bubble" id="info-bubble" role="tooltip">
+                <p class="info-text">
+                    Live human edits to Wikipedia geographic articles worldwide, colored by language edition.
+                </p>
+                <a class="info-credit" href="https://github.com/jacopo-cr" target="_blank"
+                    rel="noopener noreferrer">@jacopo-cr</a>
+            </div>
+        </div>
+        <main class="map-pane">
+            <canvas id="map-canvas"></canvas>
+        </main>
+        <aside class="feed-pane">
+            <ul id="feed-list" class="feed-list"></ul>
+        </aside>
+    </div>
     <script type="module" src="./app.js"></script>
 </body>
 
