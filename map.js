@@ -10,6 +10,17 @@ const REF_PADDING = 24;
 const MIN_RING_AREA = 8.0;
 const SIMPLIFY_TOLERANCE = 2.0;
 const MAX_SEGMENT_LEN = 18.0;
+const STATION_RADIUS = 5.4;
+const STATION_STROKE_WIDTH = 2.1;
+const POP_IN_MS = 400;
+const PULSE_DELAY_MS = 100;
+const PULSE_DURATION_MS = 1150;
+const PULSE_MAX_MULTIPLIER = 6.3;
+const PULSE_STROKE_WIDTH = 1.5;
+const HOLD_MS = 8000;
+const SHRINK_MS = 500;
+const MAX_ACTIVE_STATIONS = 150;
+const HARD_STATION_LIMIT = 180;
 
 const WATER_COLOR = '#F2EEE4';
 const LAND_COLOR = '#E4DFD1';
@@ -194,6 +205,12 @@ function computeBounds(polygons) {
     return { minX, maxX, minY, maxY };
 }
 
+function easeOutBack(x) {
+    const c1 = 1.70158;
+    const c3 = 2.70158;
+    return 1 + c3 * (x - 1) ** 3 + c1 * (x - 1) ** 2;
+}
+
 export function initMap(canvas) {
     const ctx = canvas.getContext('2d', { alpha: false });
     const landCanvas = document.createElement('canvas');
@@ -204,7 +221,12 @@ export function initMap(canvas) {
     let smoothedPolygons = [];
     let landBounds = { minX: 0, maxX: REF_WIDTH, minY: 0, maxY: REF_HEIGHT };
     let liveProjection = geoNaturalEarth1();
+
+    let cssWidth = 0;
+    let cssHeight = 0;
     let currentDpr = 1;
+    let dotScaleFactor = 1;
+    let needsDraw = true;
     const stations = [];
 
     function updateLayoutAndLandCache() {
@@ -212,6 +234,9 @@ export function initMap(canvas) {
         const w = Math.max(1, rect.width);
         const h = Math.max(1, rect.height);
         const dpr = Math.max(1, window.devicePixelRatio || 1);
+
+        cssWidth = w;
+        cssHeight = h;
         currentDpr = dpr;
 
         canvas.width = Math.round(w * dpr);
@@ -228,8 +253,8 @@ export function initMap(canvas) {
 
         const widthPad = w < availH ? 0.97 : 0.96;
         const scale = Math.min((w * widthPad) / boundsW, (availH * 0.935) / boundsH);
+        dotScaleFactor = Math.max(0.68, Math.min(1, scale * 1.15));
 
-        // Slight horizontal offset balances the Atlantic/Pacific framing nicely
         const visualCenterX = boundsCenterX + boundsW * 0.01;
         const offsetX = w * 0.5 - visualCenterX * scale;
         const topSpace = Math.max(availH * 0.052, (availH - boundsH * scale) * 0.5);
@@ -239,7 +264,6 @@ export function initMap(canvas) {
             .scale(refScale * scale)
             .translate([offsetX + refTranslate[0] * scale, offsetY + refTranslate[1] * scale]);
 
-        // Pre-render the static map onto landCanvas
         landCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
         landCtx.fillStyle = WATER_COLOR;
         landCtx.fillRect(0, 0, w, h);
@@ -261,27 +285,29 @@ export function initMap(canvas) {
             landCtx.restore();
         }
 
-        drawStaticFrame();
-    }
-
-    function drawStaticFrame() {
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.drawImage(landCanvas, 0, 0);
-        ctx.setTransform(currentDpr, 0, 0, currentDpr, 0, 0);
-
-        ctx.fillStyle = STATION_FILL;
-        ctx.strokeStyle = STATION_STROKE;
-        ctx.lineWidth = 2.1;
+        // Re-project existing stations if the window resized
         for (const st of stations) {
             const pt = liveProjection([st.lon, st.lat]);
-            if (!pt) continue;
-            ctx.beginPath();
-            ctx.arc(pt[0], pt[1], 5.4, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.stroke();
+            if (pt) {
+                st.x = pt[0];
+                st.y = pt[1];
+            }
+        }
+
+        needsDraw = true;
+    }
+
+    function checkResize() {
+        const rect = canvas.getBoundingClientRect();
+        const w = Math.max(1, rect.width);
+        const h = Math.max(1, rect.height);
+        const dpr = Math.max(1, window.devicePixelRatio || 1);
+        if (w !== cssWidth || h !== cssHeight || dpr !== currentDpr) {
+            updateLayoutAndLandCache();
         }
     }
 
+    new ResizeObserver(updateLayoutAndLandCache).observe(canvas.parentElement || canvas);
     window.addEventListener('resize', updateLayoutAndLandCache);
     updateLayoutAndLandCache();
 
@@ -301,11 +327,127 @@ export function initMap(canvas) {
         })
         .catch(() => { });
 
-    function addStation(lon, lat) {
-        stations.push({ lon, lat });
-        if (stations.length > 120) stations.shift();
-        drawStaticFrame();
+    function addStation(lon, lat, color, onExitStart) {
+        const pt = liveProjection([lon, lat]);
+        if (!pt) return false;
+
+        const now = performance.now();
+        stations.push({
+            lon,
+            lat,
+            x: pt[0],
+            y: pt[1],
+            color,
+            createdAt: now,
+            exitStartAt: now + POP_IN_MS + HOLD_MS,
+            exitingNotified: false,
+            onExitStart: typeof onExitStart === 'function' ? onExitStart : null,
+            scale: 0,
+            pulseRadius: STATION_RADIUS,
+            pulseAlpha: 0,
+        });
+
+        // Gently expire oldest stations if too many accumulate during spikes
+        let activeCount = stations.filter((s) => s.exitStartAt > now).length;
+        if (activeCount > MAX_ACTIVE_STATIONS) {
+            let toExpire = activeCount - MAX_ACTIVE_STATIONS;
+            for (let i = 0; i < stations.length && toExpire > 0; i++) {
+                if (stations[i].exitStartAt > now) {
+                    stations[i].exitStartAt = now;
+                    toExpire--;
+                }
+            }
+        }
+
+        if (stations.length > HARD_STATION_LIMIT) {
+            const removed = stations.splice(0, stations.length - HARD_STATION_LIMIT);
+            for (const st of removed) {
+                if (!st.exitingNotified && st.onExitStart) {
+                    st.exitingNotified = true;
+                    st.onExitStart();
+                }
+            }
+        }
+
+        needsDraw = true;
+        return true;
     }
 
+    function renderFrame(now) {
+        checkResize();
+
+        if (stations.length === 0 && !needsDraw) {
+            requestAnimationFrame(renderFrame);
+            return;
+        }
+
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.drawImage(landCanvas, 0, 0);
+        ctx.setTransform(currentDpr, 0, 0, currentDpr, 0, 0);
+
+        // Update station lifecycles and filter out finished ones
+        for (let i = stations.length - 1; i >= 0; i--) {
+            const st = stations[i];
+            const age = now - st.createdAt;
+            const baseScale = age < POP_IN_MS ? Math.max(0, easeOutBack(age / POP_IN_MS)) : 1;
+
+            if (now >= st.exitStartAt) {
+                if (!st.exitingNotified) {
+                    st.exitingNotified = true;
+                    if (st.onExitStart) st.onExitStart();
+                }
+                const shrinkT = (now - st.exitStartAt) / SHRINK_MS;
+                if (shrinkT >= 1) {
+                    stations.splice(i, 1);
+                    continue;
+                }
+                st.scale = Math.max(0, baseScale * (1 - shrinkT ** 3));
+                st.pulseAlpha = 0;
+            } else {
+                st.scale = baseScale;
+                const pulseAge = age - PULSE_DELAY_MS;
+                if (pulseAge >= 0 && pulseAge < PULSE_DURATION_MS) {
+                    const pt = pulseAge / PULSE_DURATION_MS;
+                    const eased = 1 - (1 - pt) ** 3;
+                    st.pulseRadius = STATION_RADIUS * dotScaleFactor * (1 + (PULSE_MAX_MULTIPLIER - 1) * eased);
+                    st.pulseAlpha = Math.max(0, (1 - pt) ** 1.35 * 0.85);
+                } else {
+                    st.pulseAlpha = 0;
+                }
+            }
+        }
+
+        // Pass 1: Expanding language-colored pulse rings
+        ctx.lineWidth = PULSE_STROKE_WIDTH * dotScaleFactor;
+        for (const st of stations) {
+            if (st.pulseAlpha > 0.005) {
+                ctx.globalAlpha = st.pulseAlpha;
+                ctx.strokeStyle = st.color;
+                ctx.beginPath();
+                ctx.arc(st.x, st.y, st.pulseRadius, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+        }
+        ctx.globalAlpha = 1;
+
+        // Pass 2: White ink-ringed station circles
+        ctx.fillStyle = STATION_FILL;
+        ctx.strokeStyle = STATION_STROKE;
+        for (const st of stations) {
+            if (st.scale > 0.01) {
+                const radius = STATION_RADIUS * dotScaleFactor * st.scale;
+                ctx.lineWidth = STATION_STROKE_WIDTH * dotScaleFactor * st.scale;
+                ctx.beginPath();
+                ctx.arc(st.x, st.y, radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+            }
+        }
+
+        needsDraw = stations.length > 0;
+        requestAnimationFrame(renderFrame);
+    }
+
+    requestAnimationFrame(renderFrame);
     return { addStation };
 }

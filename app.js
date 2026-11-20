@@ -123,7 +123,7 @@ function lookupCoordinates(edit) {
 }
 
 function onGeotaggedEdit(edit) {
-    map.addStation(edit.lon, edit.lat);
+    map.addStation(edit.lon, edit.lat, '#C96F62');
     console.log(`📍 [${edit.lang.toUpperCase()}] ${edit.title} -> (${edit.lat.toFixed(2)}, ${edit.lon.toFixed(2)})`);
 }
 
