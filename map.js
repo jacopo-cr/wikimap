@@ -109,7 +109,7 @@ function subdivideLongEdges(ring, maxLen) {
     return out;
 }
 
-// Midpoint quadratic B-spline smoothing for the rounded Mini Metro coastline look
+// Midpoint quadratic B-spline smoothing for the rounded coastline look
 function traceSmoothRing(ctx, ring) {
     if (ring.length < 3) return;
     const last = ring[ring.length - 1];
