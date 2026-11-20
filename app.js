@@ -1,3 +1,6 @@
+import { initMap } from './map.js';
+const map = initMap(document.getElementById('map-canvas'));
+
 const STREAM_URL = 'https://stream.wikimedia.org/v2/stream/recentchange';
 const USER_AGENT = 'WikipediaLive/1.0 (https://www.mediawiki.org/wiki/API:Etiquette)';
 
@@ -120,6 +123,7 @@ function lookupCoordinates(edit) {
 }
 
 function onGeotaggedEdit(edit) {
+    map.addStation(edit.lon, edit.lat);
     console.log(`📍 [${edit.lang.toUpperCase()}] ${edit.title} -> (${edit.lat.toFixed(2)}, ${edit.lon.toFixed(2)})`);
 }
 
