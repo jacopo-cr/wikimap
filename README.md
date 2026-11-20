@@ -1,5 +1,6 @@
 # Wikipedia, Live
 <img width="908" height="652" alt="wikimap" src="https://github.com/user-attachments/assets/e3767007-baa6-4f0f-86e5-df99d5e7d8e8" />
+
 **[Live Demo](https://jacopo-cr.github.io/wikimap/)**
 
 A real-time world map and live feed of human edits to geotagged Wikipedia articles.
